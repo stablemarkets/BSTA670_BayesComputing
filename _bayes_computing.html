@@ -228,7 +228,7 @@ Recall Monte Carlo (MC) integration. Given `\(i.i.d\)` samples `\(\{\theta^{(t)}
 --
 
 Some properties:
-- Convergence rate ($\sqrt{T}$) independent of `\(dim(\theta)\)`.
+- Convergence rate, `\(\sqrt{T}\)`, independent of `\(dim(\theta)\)`.
 - Converges to posterior mean exactly based on LLN.
 - We have `\(\{\theta^{(t)}\}_{1:T}\)` from MCMC, but they are not exactly `\(i.i.d\)`.
   - Effective number of draws is less than `\(T\)`.
@@ -253,6 +253,24 @@ Suppose we want estimate `\(\hat{OR}=E[exp(\theta)|D]\)`
 
 ---
 ## Bayesian Prediction
+Suppose we sample parameters of this model with some prior
+
+`$$y_i | x_i, \theta_0, \theta_1, \phi \sim N( \ \theta_0 + \theta_1x_i, \ \phi)$$`
+
+And get posterior draws `\(\{\theta_0^{(t)}, \theta_1^{(t)}, \phi^{(t)}\}_{1:T}\)`. Given new `\(\tilde x_i\)`, form out-of-sample prediction
+
+`$$\begin{align}
+	E[\tilde y| \tilde x, D] &amp; = \int_\Theta E[\ \tilde y \ | \ \tilde x, \theta_0,\theta_1,\phi] \cdot p(\theta_0,\theta_1,\phi| D)  \\
+	&amp; \approx \frac{1}{T} \sum_{i=1}^T E[\ \tilde y \ | \ \tilde x, \theta_0^{(t)},\theta_1^{(t)},\phi^{(t)}] = \frac{1}{T} \sum_{i=1}^T \theta_0^{(t)} + \theta_1^{(t)}x_i 
+\end{align}$$`
+
+--
+
+&lt;img src="_bayes_computing_files/figure-html/bayespred-.gif" style="display: block; margin: auto;" /&gt;
+
+
+---
+## Approximation Methods
 
 
 
