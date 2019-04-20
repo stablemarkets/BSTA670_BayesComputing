@@ -12,7 +12,7 @@
 class: center, middle, inverse, title-slide
 
 # BSTA 670:
-## Bayesian Computation: Sampling, Integration, and Approximate Methods
+## Bayesian Computation: MCMC Sampling, Integration, and Approximate Inference
 ### Arman Oganisian <br/> <a href="mailto:aoganisi@upenn.edu">aoganisi@upenn.edu</a>
 ### April 23, 2019
 
@@ -36,14 +36,13 @@ $$
 - Inference engines:
   - Frequentist: **optimization methods** for maximizing `\(p( D| \theta)\)`.
   - Bayesian: **sampling methods** for drawing from `\(p( \theta | D)\)`.
-    - Difficulty since `\(C\)` unknown
-    - 
+    - Difficult since `\(C\)` unknown.
 
 ---
 ## Gibbs Sampler for Linear Regression
 
 - Data `\(D = (y_i,  x_i)_{1:n}\)` and `\(\theta = (\beta, \phi)\)`, where `\(x_i, \beta \in \mathbb{R}^{p+1}\)`.
-- `\(p( D |  \theta) = p(y_i |  x_i,  \theta ) \stackrel{d}{=} N( x_i '  \beta, \phi)\)`.
+- `\(p( D |  \theta) = \prod_ip(y_i |  x_i,  \theta ) \stackrel{d}{=} \prod_iN(y_i\ ;\ x_i '  \beta, \phi)\)`.
 - If we use joint prior `\(p(\theta) = p(\beta)p(\phi) = N_{p+1}( 0,  I)IG(\alpha, \lambda)\)`, then
 
 --
@@ -102,12 +101,12 @@ for( i in 2:iter){
 ## Sampling for a Logistic Regression
 
 - Data `\(D = (y_i, x_i)_{1:n}\)`, where `\(x_i \in \mathbb{R}^{p+1}\)` and `\(y_i \in \{0,1\}\)`.	
-`$$p( D | \theta) \stackrel{d}{=} Ber\big( expit( x_i ' \theta) \big)$$` 
+`$$p( D | \theta) \stackrel{d}{=} \prod_iBer\big( \ y_i \ ; \ expit( x_i ' \theta) \big)$$` 
 
 `$$p(\theta) \stackrel{d}{=} N_{p+1}( 0, I)$$`
 
 - Posterior is unknown:
-`$$p(\theta | D) \propto Ber\big( expit( x_i ' \theta) \big) N_{p+1}( 0, I)$$`
+$$p(\theta | D) \propto N_{p+1}( 0, I) \prod_iBer\big( \ y_i \ ; \ expit( x_i ' \theta) \big) $$
 - Gibbs can't be used here.
 
 ---
@@ -144,7 +143,7 @@ theta[,1] &lt;- c(0,0) # initialize
 
 for(i in 2:iter){
   # propose theta
-  theta_star &lt;- MASS::mvrnorm(1, theta[,i-1] , .001*diag(2) )
+  theta_star &lt;- MASS::mvrnorm(1, theta[,i-1] , tau*diag(2) )
   
   # accept/reject
   prop_eval &lt;- p_tilde(y, x, theta_star)
@@ -165,21 +164,6 @@ for(i in 2:iter){
 
 
 &lt;img src="_bayes_computing_files/figure-html/sampleani-.gif" style="display: block; margin: auto;" /&gt;
-
----
-## Why does MH Work?
-- Need to show that `\(p(\theta|D)\)` is the **equilibrium** or **stationary distribution** of `\(\{\theta^{(t)} \}_{t=1}^\infty\)`.
-- This is gauranteed if `\(p(\theta|D)\)` satisfies **detailed balance**. For any two values `\(\theta^i, \theta^j\)`,
-  - `\(p(\theta^i|D) T(\theta^j|\theta^i) = p(\theta^j|D) T(\theta^i | \theta^j)\)`
-  - For MH, with symmetric proposal, `\(T(\theta^j|\theta^i) = Q(\theta^{j}| \theta^{i}) \min(1, \frac{p(\theta^j|D)Q(\theta^j|\theta^i)}{p(\theta^i|D) Q(\theta^i|\theta^j)} )\)`
-  - Without loss of generality, let `\(\frac{p(\theta^j|D)}{p(\theta^i|D)} &lt; 1\)`
-  
-$$
-`\begin{align}
-  p(\theta^i|D) T(\theta^j|\theta^i) &amp; = p(\theta^i|D) \cdot Q(\theta^{j}| \theta^{i}) \cdot \frac{p(\theta^j|D)Q(\theta^j|\theta^i)}{p(\theta^i|D) Q(\theta^i|\theta^j)} \\
-  &amp; = Q(\theta^{j}| \theta^{i}) \cdot p(\theta^j|D) \\
-\end{align}`
-$$
 
 ---
 ## Extensions
@@ -257,7 +241,10 @@ Suppose we sample parameters of this model with some prior
 
 `$$y_i | x_i, \theta_0, \theta_1, \phi \sim N( \ \theta_0 + \theta_1x_i, \ \phi)$$`
 
-And get posterior draws `\(\{\theta_0^{(t)}, \theta_1^{(t)}, \phi^{(t)}\}_{1:T}\)`. Given new `\(\tilde x_i\)`, form out-of-sample prediction
+And get posterior draws `\(\{\theta_0^{(t)}, \theta_1^{(t)}, \phi^{(t)}\}_{1:T}\)`. Given new `\(\tilde x_i\)`, form 
+out-of-sample prediction
+
+--
 
 `$$\begin{align}
 	E[\tilde y| \tilde x, D] &amp; = \int_\Theta E[\ \tilde y \ | \ \tilde x, \theta_0,\theta_1,\phi] \cdot p(\theta_0,\theta_1,\phi| D)  \\
@@ -272,9 +259,122 @@ And get posterior draws `\(\{\theta_0^{(t)}, \theta_1^{(t)}, \phi^{(t)}\}_{1:T}\
 ---
 ## Approximation Methods
 
+Upside of MCMC
+  - **Asymptotically exacty**: chains guaranteed to converge to exact posterior. 
+  - **Can bound errors**: easy to measure autocorrelation in chains and error in integration.
+
+--
+  
+Downside of MCMC:
+  - **Slow**: in complicated samplers, may take an hour to get a single draw!
+  
+--
+
+Motivates the need for approximation methods: find some `\(q(\theta)\)`, where `\(dim(\theta)=p\)`, such that
+`$$q(\theta) \approx p(\theta|D)$$`
+
+---
+## Variational Bayes 
+
+Find approximation `\(q^*(\theta)\)` to `\(p(\theta|D)\)` such that Kullback–Leibler divergence is minimized:
+
+$$
+`\begin{align}
+q* &amp; = \underset{q}{\operatorname{argmin}} KL( q || p ) \\ 
+   &amp; = \underset{q}{\operatorname{argmin}} - \int_\Theta q(\theta) \ log\Big[ \frac{p(\theta|D)}{q(\theta)}\Big]d\theta
+\end{align}`
+$$
+This is too hard of a search problem - space of `\(q(\theta)\)` is too large.
+
+
+--
+
+Restrict `\(q(\theta)\)` to the "mean-field family",
+$$ q(\theta) = \prod_{i=1}^p q_i(\theta_i) $$
+
+---
+## Mean-Field Variational Bayes
+
+Then the solution for each `\(q_j(\theta_j)\)` is 
+`$$\log q_j^*(\theta_j) \propto E_{ \ \theta_{-j}\sim q_{-j}(\theta_{-j} )}\Big[ \log p(D|\theta)p(\theta) \Big]$$`
+These updating equations define a **Coordinate Ascent** algorithm:
+
+- **Initialize**: `\(q(\theta_j)^{(0)}=q_j^{(0)}\)` for `\(j=1, \dots, p\)`.
+- **Update**: for `\(t=1, \dots, T\)`.
+  - `\(q_1^{(t)}\)` conditional on `\(q_2^{(t-1)}, \dots, q_p^{(t-1)}\)`.
+  - `\(q_2\)` conditional on `\(q_1^{(t)}, q_3^{(t-1)}, \dots, q_p^{(t-1)}\)`
+  - `\(q_3\)` conditional on `\(q_1^{(t)}, q_2^{(t)}, q_4^{(t-1)}, \dots, q_p^{(t-1)}\)`
+  - ...
+  - `\(q_p\)` conditional on `\(q_1^{(t)}, q_2^{(t)}, q_3^{(t)}, \dots, q_p-1^{(t-1)}\)`
+
+---
+## Regression with Variational Bayes
+Consider model for `\(D = (y_i, x_{0i}, x_{1i})_{1:n}\)` with known `\(\phi\)`
+
+`$$y_i | \theta \sim N\big(x_{0i}\theta_0 + x_{1i}\theta_1, \phi\big)$$`
+With prior `\(p(\theta_0) p(\theta_1) = N(0, \tau)N(0, \tau)\)`,
+
+$$\log p(D|\theta)p(\theta) \propto \log \Big[ \prod_{n=1}^N N(y_i; x_0\theta_0 + x_1\theta_1, \phi )\Big] + \log N(\beta_0; 0, \tau )  + \log N(\beta_1; 0, \tau ) $$
+---
+## Regression with Variational Bayes
+
+We assume mean-field family `\(q(\theta) = q_0(\theta_0)q_1(\theta_1)\)`. 
+
+Using the solution expression for `\(\log q^*_j\)`, 
+
+$$
+`\begin{align}
+\log q_0^*(\theta_0) &amp; \propto E_{ \ \theta_1\sim q_1}\Big[ \log p(D|\theta)p(\theta) \Big] \\
+                    &amp; \propto - \frac{1}{2(\frac{\phi}{\sum_i x_{0i}^2 + \frac{\phi}{\tau} })} \Big\{ \theta_0^2 - 2\theta_0\Big[ \frac{\sum_ix_{0i}y_i - E_{\theta_1\sim q_1}[\theta_1]\sum_i x_{0i}x_{1i} }{ \sum_i x_{0i}^2 + \frac{\phi}{\tau}} \  \Big] \Big\} \\
+                    \Rightarrow q_0^*(\theta_0) &amp; \stackrel{d}{=} N(\mu_0, \lambda_0) 
+\end{align}`
+$$
+
+Where `\(\mu_0 = \frac{\sum_ix_{0i}y_i - E_{\theta_1\sim q_1}[\theta_1]\sum_i x_{0i}x_{1i} }{ \sum_i x_{0i}^2 - \frac{\tau}{2}}\)` and `\(\lambda_0 = \frac{\phi}{\sum_i x_{0i}^2 - \frac{\tau}{2} }\)`.
+
+- Note dependence on `\(E_{\theta_1\sim q_1}[\theta_1]\)`
+- Math is same for `\(q_1^*(\theta_1)\stackrel{d}{=}N(\mu_1, \lambda_1)\)`, with 
+  - `\(\mu_1 = \frac{\sum_ix_{1i}y_i - E_{\theta_0\sim q_0}[\theta_0]\sum_i x_{0i}x_{1i} }{ \sum_i x_{1i}^2 + \frac{\phi}{\tau}}\)` and `\(\lambda_1 = \frac{\phi}{\sum_i x_{1i}^2 + \frac{\phi}{\tau} }\)`
+
 
 
 ---
+## Coordinate Ascent for VB
+
+Note `\(\lambda_1, \lambda_0\)` are known. They don't need to be updated.
+
+Coordinate ascent with updating equations:
+
+- Initialize `\(\mu_0^{(0)}, \mu_1^{(0)}\)`
+- for `\(t=1, \dots, T\)`,
+  - `\(\mu_0^{(t)} = \frac{\sum_ix_{0i}y_i - \mu_1^{(t-1)}\sum_i x_{0i}x_{1i} }{ \sum_i x_{0i}^2 + \frac{\phi}{\tau}}\)`
+  - `\(\mu_1^{(t)} = \frac{\sum_ix_{1i}y_i - \mu_0^{(t-1)}\sum_i x_{0i}x_{1i} }{ \sum_i x_{1i}^2 + \frac{\phi}{\tau}}\)`
+
+`$$p(\theta|D) \approx q(\theta_0) q(\theta_1) = N\Big\{ \begin{bmatrix} \mu_0^{(T)} \\ \mu_1^{(T)} \\\end{bmatrix} , 
+                      \begin{bmatrix} \lambda_0 &amp; 0\\ 0 &amp; \lambda_1 \\ \end{bmatrix} \Big\}$$`
+
+
+---
+## Coordinate Ascent for VB
+
+
+
+
+&lt;img src="_bayes_computing_files/figure-html/vb_plotting-.gif" style="display: block; margin: auto;" /&gt;
+
+---
+&lt;img src="_bayes_computing_files/figure-html/vb_v_mcmc-1.png" style="display: block; margin: auto;" /&gt;
+
+
+---
+## Summary
+
+- MCMC Sampling 
+  - Gibbs Sampling
+  - Metropolis-Hastings 
+- Monte Carlo Integration
+  - Computing posterior summaries
+- Posterior Approximation with VB
     </textarea>
 <style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
 <script src="style/libs/remark-latest.min.js"></script>
