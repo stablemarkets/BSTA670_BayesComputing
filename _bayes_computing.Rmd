@@ -112,7 +112,6 @@ for( i in 2:iter){
 - These are the **Monte Carlo Markov Chains**.
 	- **Monte Carlo**: each element of the chain is randomly drawn/simulated.
 	- **Markov**: $\theta^{(t)}$ only depends on the previous element $\theta^{(t-1)}$.
-- Markov Chains require an explicit **transition distribution/rule**, $T(\beta^{(t+1)} | \beta^{(t)})$.
 
 ---
 ## Gibbs Sampling
@@ -166,14 +165,14 @@ $$p(\theta | D) \propto N_{p+1}( 0, I) \prod_iBer\big( \ y_i \ ; \ expit( x_i ' 
 ---
 ## The Metropolis-Hastings Sampler
 <small>
-Along with initial value, $\theta^{(0)}$, MH algorithm requires three inputs:
+Along with initial value, $\theta^{(0)}$, MH algorithm requires two inputs:
 - **Unnormalized target density**, $\tilde p(\theta | D)$: 
 $$p(\theta | D) =C\cdot\tilde p(\theta | D) = C\cdot Ber\big( expit( x_i ' \theta) \big)  N_{p+1}( 0, I)$$
 - **Jumping Distribution**: 
 $$Q(\theta^* | \theta) = N_{p+1}( \theta, \tau  )$$
 </small>
 <center>
-<img src='figures/MHalgo.png' width=80%>
+<img src='figures/MHalgo.png' width=30% height=50%>
 </center>
 
 ---
@@ -437,7 +436,7 @@ out-of-sample prediction
 
 $$\begin{align}
 	E[\tilde y| \tilde x, D] & = \int_\Theta E[\ \tilde y \ | \ \tilde x, \theta_0,\theta_1,\phi] \cdot p(\theta_0,\theta_1,\phi| D)  \\
-	& \approx \frac{1}{T} \sum_{i=1}^T E[\ \tilde y \ | \ \tilde x, \theta_0^{(t)},\theta_1^{(t)},\phi^{(t)}] = \frac{1}{T} \sum_{i=1}^T \theta_0^{(t)} + \theta_1^{(t)}x_i 
+	& \approx \frac{1}{T} \sum_{i=1}^T E[\ \tilde y \ | \ \tilde x, \theta_0^{(t)},\theta_1^{(t)},\phi^{(t)}] = \frac{1}{T} \sum_{i=1}^T \theta_0^{(t)} + \theta_1^{(t)} \tilde x_i 
 \end{align}$$
 
 --
@@ -448,7 +447,7 @@ par(mfrow=c(1,3))
 beta[,1] <- c(9.5,9.5)
 
 for( i in seq(10, 1000, 10)){
-  plot(beta[1,2:i], beta[2,2:i], xlab='theta_1',ylab='theta_2',
+  plot(beta[1,2:i], beta[2,2:i], xlab='theta_0',ylab='theta_1',
        xlim=c(9.5,10.5), ylim=c(9.5,10.5), pch=20,
        main='Theta Joint Posterior')
   points(10,10, col='red',pch=20)
@@ -498,7 +497,7 @@ Downside of MCMC:
   
 --
 
-Motivates the need for approximation methods: find some $q(\theta)$, where $dim(\theta)=p$, such that
+Motivates the need for approximation methods: find some $q(\theta)$ such that
 $$q(\theta) \approx p(\theta|D)$$
 
 ---
@@ -527,13 +526,13 @@ Then the solution for each $q_j(\theta_j)$ is
 $$\log q_j^*(\theta_j) \propto E_{ \ \theta_{-j}\sim q_{-j}(\theta_{-j} )}\Big[ \log p(D|\theta)p(\theta) \Big]$$
 These updating equations define a **Coordinate Ascent** algorithm:
 
-- **Initialize**: $q(\theta_j)^{(0)}=q_j^{(0)}$ for $j=1, \dots, p$.
+- **Initialize**: $q_j(\theta_j)^{(0)}=q_j^{(0)}$ for $j=1, \dots, p$.
 - **Update**: for $t=1, \dots, T$.
   - $q_1^{(t)}$ conditional on $q_2^{(t-1)}, \dots, q_p^{(t-1)}$.
-  - $q_2$ conditional on $q_1^{(t)}, q_3^{(t-1)}, \dots, q_p^{(t-1)}$
-  - $q_3$ conditional on $q_1^{(t)}, q_2^{(t)}, q_4^{(t-1)}, \dots, q_p^{(t-1)}$
+  - $q_2^{(t)}$ conditional on $q_1^{(t)}, q_3^{(t-1)}, \dots, q_p^{(t-1)}$
+  - $q_3^{(t)}$ conditional on $q_1^{(t)}, q_2^{(t)}, q_4^{(t-1)}, \dots, q_p^{(t-1)}$
   - ...
-  - $q_p$ conditional on $q_1^{(t)}, q_2^{(t)}, q_3^{(t)}, \dots, q_p-1^{(t-1)}$
+  - $q_p^{(t)}$ conditional on $q_1^{(t)}, q_2^{(t)}, q_3^{(t)}, \dots, q_p-1^{(t-1)}$
 
 ---
 ## Regression with Variational Bayes
@@ -576,7 +575,7 @@ Coordinate ascent with updating equations:
 - Initialize $\mu_0^{(0)}, \mu_1^{(0)}$
 - for $t=1, \dots, T$,
   - $\mu_0^{(t)} = \frac{\sum_ix_{0i}y_i - \mu_1^{(t-1)}\sum_i x_{0i}x_{1i} }{ \sum_i x_{0i}^2 + \frac{\phi}{\tau}}$
-  - $\mu_1^{(t)} = \frac{\sum_ix_{1i}y_i - \mu_0^{(t-1)}\sum_i x_{0i}x_{1i} }{ \sum_i x_{1i}^2 + \frac{\phi}{\tau}}$
+  - $\mu_1^{(t)} = \frac{\sum_ix_{1i}y_i - \mu_0^{(t)}\sum_i x_{0i}x_{1i} }{ \sum_i x_{1i}^2 + \frac{\phi}{\tau}}$
 
 $$p(\theta|D) \approx q(\theta_0) q(\theta_1) = N\Big\{ \begin{bmatrix} \mu_0^{(T)} \\ \mu_1^{(T)} \\\end{bmatrix} , 
                       \begin{bmatrix} \lambda_0 & 0\\ 0 & \lambda_1 \\ \end{bmatrix} \Big\}$$
