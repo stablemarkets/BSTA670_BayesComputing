@@ -111,6 +111,20 @@ This posterior is not a known distribution. Need a way to sample from
 $$p (\theta_0, \theta_1, \mid D) = \frac{1}{C}\tilde p (\theta_0, \theta_1, \mid D)$$
 ---
 
+## Stochastic Processes
+Markov chain $\{\theta^{(t)}\} = \{\theta^{(0)}, \theta^{(1)}, \dots \}$ such that, 
+$$p(\theta^{(t)} \mid \theta^{(0)},\dots,\theta^{(t-1)}) = p(\theta^{(t)} | \theta^{(t-1)} )$$
+
+Construct transition probability $p(\theta^{(t)} | \theta^{(t-1)})$ so that 
+$$ lim_{ \ t\rightarrow\infty}||p(\theta^{(t)}) - p(\theta|D)|| = 0$$
+
+This happens if transition probability satisfies certain conditions
+- aperiodicity, irreducability, etc.
+- *Introduction to Stochastic Processes* by Hoel et al.
+
+---
+
+
 ## Metropolis, 1953
 Suppose we have $N$ particles in a 2-dimensional plane. The $i^{th}$ particle has Euclidian distance $d_{ij}$ with particle $j$. Let 
 $$\Delta = \{d_{ij} : \forall \ (i,j) \text{ pairs } \}$$
