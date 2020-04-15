@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>BSTA 670:</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Arman Oganisian   aoganisi@upenn.edu" />
+    <meta name="date" content="2020-04-16" />
+    <link rel="stylesheet" href="style/penn.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# BSTA 670:
+## Bayesian Computation: Metropolis Hastings Samplers and Monte Carlo Integration
+### Arman Oganisian <br/> <a href="mailto:aoganisi@upenn.edu">aoganisi@upenn.edu</a>
+### April 16, 2020
+
+---
+
+
+
+
+
+
+## Overview of Bayesian Inference
+- Parameter vector `\(\theta \in \mathbb{R}^p\)` and data `\(D\)`.
+- `\(p( D|  \theta)\)` with prior `\(p(\theta)\)` over parameters space.
+
+$$
+`\begin{align}
+	p(\theta | D) &amp; = \frac{1}{C}\cdot p( D|  \theta) p( \theta) \\
+					&amp; \propto p( D|  \theta) p( \theta) \\
+\end{align}`
+$$
+
+Specifically, `\(C=p(D)\)`. Denote
+$$ \tilde p(\theta\mid D) = p( D|  \theta) p( \theta)$$
+
+- Inference engines:
+  - Frequentist: optimization methods for maximizing `\(p( D| \theta)\)`.
+  - Bayesian: sampling methods for drawing from `\(p( \theta | D)\)`.
+    - Difficult since `\(C\)` unknown.
+
+---
+
+
+## To Make things more concrete
+
+We observe `\(D = (y_i, x_i)_{1:n}\)`. Specify, 
+$$ p(D \mid \theta ) = p(y_i\mid x_i, \theta) = N( y_i \mid \theta_0 + \theta_1 x_i, \phi  )$$
+--
+Suppose `\(\phi\)` is known. Here, `\(\theta = (\theta_0, \theta_1) \in \mathbb{R}^2\)`
+$$ p(\theta_0, \theta_1) = N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda ) $$
+--
+So, the posterior is proportional to 
+`$$\tilde p (\theta_0, \theta_1, \mid D) = \Big\{\prod_i N( y_i \mid \theta_0 + \theta_1 x_i, \phi  ) \Big\} N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$`
+We can actually re-arrange `\(\tilde p\)` here: posterior is Normal as well.
+---
+
+## To Make things even more concrete
+
+We observe `\(D = (y_i, x_i)_{1:n}\)`, where `\(y_i\)` is a count outcome. Specify, 
+$$ p(D \mid \theta ) = Pois( y_i \mid \exp(\theta_0 + \theta_1 x_i) \  )$$
+--
+
+Where, `\(\theta = (\theta_0, \theta_1) \in \mathbb{R}^2\)`
+`$$p(\theta_0, \theta_1) = N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$`
+--
+So, the posterior is proportional to 
+`$$\tilde p (\theta_0, \theta_1, \mid D) = \Big\{\prod_i Pois( y_i \mid \exp(\theta_0 + \theta_1 x_i) \  ) \Big\} N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$`
+This posterior is not a known distribution.
+---
+
+## Sampling for a Logistic Regression
+We observe `\(D = (y_i, x_i)_{1:n}\)`, where `\(y_i\)` is a binary outcome. Specify, 
+$$ p(D \mid \theta ) = Ber( y_i \mid expit(\theta_0 + \theta_1 x_i) \  )$$
+--
+
+Where `\(\theta = (\theta_0, \theta_1) \in \mathbb{R}^2\)`
+$$ p(\theta_0, \theta_1) = N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda ) $$
+
+--
+So, the posterior is proportional to 
+`$$\tilde p (\theta_0, \theta_1, \mid D) = \Big\{\prod_i Ber( y_i \mid expit(\theta_0 + \theta_1 x_i) \  ) \Big\} N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$`
+This posterior is not a known distribution. Need a way to sample from 
+`$$p (\theta_0, \theta_1, \mid D) = \frac{1}{C}\tilde p (\theta_0, \theta_1, \mid D)$$`
+---
+
+## Metropolis, 1953
+Suppose we have `\(N\)` particles in a 2-dimensional plane. The `\(i^{th}\)` particle has Euclidian distance `\(d_{ij}\)` with particle `\(j\)`. Let 
+`$$\Delta = \{d_{ij} : \forall \ (i,j) \text{ pairs } \}$$`
+`\(\bar n(\Delta)\)` denotes average density of all other particles on the surface of any given particle in the system. To estiamte `\(E[ \bar n (\Delta)]\)`, need to be able to draw from this distribution, 
+`$$p( \Delta ) = \frac{1}{C} \exp \Big(  - \frac{\mathcal{E}(\Delta) }{kT} \Big)$$`
+Where `\(\mathcal{E}(\Delta) = \sum_i \sum_{j\neq i} V(d_{ij})\)`. Boltzmann constant, `\(k\)`, and Temperature parameter `\(T\)`.
+---
+
+## Metropolis-Hastings Algorithm
+
+Starting at some value `\(\theta^{(t-1)}\)`,
+
+--
+
+1. Propose a move to `\(\theta^* \sim q( \theta^* \mid \theta^{(t-1)} )\)`
+
+--
+
+2. Evaluate 
+`$$r=\frac{ \tilde p(\theta^* \mid D)}{\tilde p(\theta^{(t-1)} \mid D )} \frac{q( \ \theta^{(t-1)} \ |\  \ \theta^*)}{q( \ \theta^* \ |\   \theta^{(t-1)} \ )}$$`
+Take the minimum `\(\alpha = min(1, r)\)`. 
+
+--
+
+3. Accept move from `\(\theta^{(t-1)} \rightarrow \theta^*\)` with probability `\(\alpha\)`.
+$$ \theta^{(t)} = \theta^* I( U &lt; \alpha ) + \theta^{(t-1)}I(U&gt;\alpha) $$
+--
+`\(U \sim Unif(0,1)\)` (works since CDF is `\(P(U &lt; \alpha) = \alpha\)` ).
+---
+
+## Metropolis Algorithm
+- `\(q(\cdot \mid \cdot )\)` is symmetric about `\(\theta^{(t-1)}\)`. e.g. 
+`$$q(\theta^* \mid \theta^{(t-1)} ) = N(\theta^{(t-1)}, \sigma^2)$$`
+Implies `\(\frac{q( \ \theta^{(t-1)} \ |\  \ \theta^*)}{q( \ \theta^* \ |\   \theta^{(t-1)} \ )}=1\)`
+
+--
+
+- Chain of `\(\theta^{(t)}\)` can be thought of as a "random walk" with step size `\(\sigma\)`.
+`$$\theta^* = \theta^{(t-1)} + \sigma\epsilon^{(t-1)}$$`
+
+--
+
+- Note use of `\(\tilde p\)` instead of `\(p\)`:
+
+`$$\frac{p(\theta^* \mid D)}{p(\theta^{(t-1)} \mid D)} = \frac{ \frac{1}{C} \tilde p(\theta^* \mid D)}{\frac{1}{C} \tilde p(\theta^{(t-1)} \mid D)} =  \frac{ \tilde p(\theta^* \mid D)}{\tilde p(\theta^{(t-1)} \mid D )}$$`
+`\(\alpha=1\)` for `\(\theta^*\)` that are up hill from `\(\theta^{(t-1)}\)`. Connects to hill-climbing algos.
+
+---
+
+## R code for MH
+
+```r
+# target log density 
+p_tilde &lt;- function(y, x, theta){
+  p &lt;- invlogit( x %*% theta)
+  lik &lt;- sum(dbinom(y, 1, p, log = T))
+  pr &lt;- sum(dnorm( theta, 0, 3, log = T))
+  eval &lt;- lik + pr
+  return(eval)
+}
+```
+---
+
+## R code for MH
+
+```r
+iter = 5000 # number of iterations
+tau = .1 # proposal sd
+theta = matrix(NA, nrow = 2, ncol = iter) # for storing draws
+theta[,1] = c(0,0) # initialize
+
+for(i in 2:iter){
+  # propose theta
+  theta_star = MASS::mvrnorm(1, theta[,i-1] , tau*diag(2) )
+  
+  # evaluate under proposal and current value
+  prop_eval = p_tilde(y, x, theta_star)
+  curr_eval = p_tilde(y, x, theta[,i-1, drop=F])
+  
+  ## compute r
+  ratio &lt;- exp( prop_eval - curr_eval )
+  alpha = min(c(1,ratio))
+  
+  ## accept or reject
+  U = (runif(1) &lt; alpha )
+  
+  theta[, i] = U*theta_star + (1-U)*theta[, i-1]
+}
+```
+---
+
+
+## MH for univariate logistic regression
+
+
+
+
+
+
+&lt;img src="_bayes_computing_files/figure-html/sampleani-.gif" style="display: block; margin: auto;" /&gt;
+---
+
+
+## Issues with Metropolis
+Like optimizers, samplers suffer from many analagous issues. 
+
+- Poor choice of proposal variance. 
+- Sampling distributions over high-dimensional spaces.
+- Sampling multi-modal distributions (bottlenecks).
+---
+
+## Issues with Metropolis - Proposal Variance
+&lt;img src="_bayes_computing_files/figure-html/unnamed-chunk-6-1.png" style="display: block; margin: auto;" /&gt;
+
+- If `\(\sigma\)` is too low, we will accept often, but take smaller step sizes each time.
+- If `\(\sigma\)` is too high, we won't accept very often but will take large step sizes. 
+---
+
+## Issues with Metropolis - Dimensionality
+&lt;img src="_bayes_computing_files/figure-html/unnamed-chunk-7-1.png" style="display: block; margin: auto;" /&gt;
+
+- Hard to find the right direction in high dimensions.
+---
+
+## Issues with Metropolis - Bottlenecks
+&lt;img src="_bayes_computing_files/figure-html/unnamed-chunk-8-1.png" style="display: block; margin: auto;" /&gt;
+---
+
+
+## Adaptive MH
+Roberts and Rosenthal, 2001: optimal acceptance rate for `\(d&gt;5\)` is `\(.234\)` 
+
+-- 
+
+Starting at some value `\(\theta^{(0)}\)`, and some proposal sd `\(\sigma^{(0)}\)`. Specify adaptation times: adapt every `\(t^A\)` iterations until iteration 1000. 
+
+--
+
+For `\(t=1,2, \dots, \dots T\)`,
+1. Propose a move to `\(\theta^* = \theta^{(t-1)} + \sigma^{(t-1)}\epsilon\)`
+2. Evaluate `\(r=\frac{ \tilde p(\theta^* \mid D)}{\tilde p(\theta^{(t-1)} \mid D )}\)`. Take `\(\alpha^{(t)} = min(1, r)\)`. 
+3. Accept/Reject.
+$$ \theta^{(t)} = \theta^* I( U &lt; \alpha ) + \theta^{(t-1)}I(U&gt;\alpha) $$
+
+--
+
+4. If `\(t\)` is an adaptation time,
+$$ \sigma^{(t)} \leftarrow \sigma^{(t-1)} \times \frac{(1/t^A) \sum_{t-t^A}^{t-1} \alpha^{(t)}}{.234} $$
+---
+
+
+## Adaptive MH
+
+
+
+&lt;img src="_bayes_computing_files/figure-html/unnamed-chunk-10-.gif" style="display: block; margin: auto;" /&gt;
+
+---
+
+
+## Dimensionality - MALA
+Vanilla Metropolis: 
+`$$\theta^{*} = \theta^{(t-1)} + \sigma\epsilon^{(t-1)}$$`
+--
+
+Metropolis-Adjusted Langevin Algorithm:
+`$$\theta^{*} = \theta^{(t-1)} + \frac{\sigma^2}{2} \cdot \nabla \tilde p( \ \theta^{(t-1)} \ ) + \sigma\epsilon^{(t-1)}$$`
+
+--
+
+- Paul Langevin: differential equation modeling motion of particles through space.
+- Tends to propose in the direction of high posterior density, `\(\nabla \tilde p(\theta^{(t-1)})\)`.
+- Generates "better" proposals.
+- Optimal acceptance rate about `\(.5\)` in high d.
+- Two changes to the Metropolis update:
+  - Need to evaluate gradient (numerically). 
+  - Need to include proposal distribution in `\(\alpha\)`
+
+---
+
+## MALA R code
+Previous univariate logistic regression
+
+```r
+for(i in 2:1000){
+  
+  ## standard normal draw
+  eps = MASS::mvrnorm(1, c(0,0), diag(2) )
+
+  ## compute gradient
+  p_tilde_grad = numDeriv::grad(p_tilde, x = theta[, i-1], 
+                                xx=x, y=y )
+  
+  ## generate proposal
+  theta_star = theta[, i-1] + .5*(sig^2)*p_tilde_grad + sig*eps
+  
+  ...
+}
+```
+
+---
+
+## Logistic Regression Example
+
+
+&lt;img src="_bayes_computing_files/figure-html/unnamed-chunk-13-.gif" style="display: block; margin: auto;" /&gt;
+---
+
+## Parallel Tempering
+
+For some temperature, `\(T\geq1\)`, Define "Tempered" posterior
+
+$$
+`\begin{align}
+	p(\theta \mid D)^{{1/T}} &amp; = \frac{1}{C^{1/T}} \tilde p(\theta \mid D)^{1/T} \\
+	                     &amp; \propto \tilde p(\theta \mid D)^{1/T}
+\end{align}`
+$$
+
+--
+
+&lt;img src="_bayes_computing_files/figure-html/unnamed-chunk-14-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+
+## Parallel Tempering
+
+&lt;img src="_bayes_computing_files/figure-html/unnamed-chunk-15-1.png" style="display: block; margin: auto;" /&gt;
+
+- Have two chains that independently update via MH in each iteration
+- After each chain is updated, propose a swap between the chains.
+- The chain targeting posterior hops from mode to mode as swaps are accepted.
+
+---
+
+## Parallel Tempering
+
+At iteration `\(m-1\)`, given `\(\theta_T^{(t-1)}\sim p(\theta |D)^{1/T}\)` for `\(T=1,\dots, \tau\)`
+
+1. Update chains for `\(p(\theta |D)^{1/T}\)` with some proposal `\(q_T\)`: 
+`$$\theta_T^{(m-1)} \stackrel{MH}{\rightarrow} \theta_T^{(m)}$$`
+
+--
+
+3. Choose two chains, `\(k,j\)` uniformly from `\(\{1, \dots,\tau\}\)` to swap. Compute acceptance probability
+
+`$$\alpha= min(1, \frac{ [ \tilde p(\theta_k|D) / \tilde p(\theta_j|D)]^{1/j} }{ [ \tilde p(\theta_k|D) / \tilde p(\theta_j|D)]^{1/k} })$$`
+
+--
+
+4. if `\(I(U\leq \alpha)\)`, swap:
+$$ \theta^{(m)}_k \leftarrow \theta_j^{(m)} $$
+$$ \theta^{(m)}_j \leftarrow \theta_k^{(m)} $$
+
+--
+
+
+- roughly: "if the relative probability `\(\theta_k\)` versus `\(\theta_j\)` is higher temperature `\(j\)`, then swap so that `\(\theta_k\)` is associated with temperature `\(j\)`"
+- Only keep chain for `\(T=1\)` (the target).
+---
+
+
+
+
+
+
+## Parallel Tempering
+
+&lt;img src="_bayes_computing_files/figure-html/make_gif-.gif" style="display: block; margin: auto;" /&gt;
+
+---
+
+
+
+## Monte Carlo Integration
+- We covered methods for obtaining draws `\(\{ \theta^{(t)} \}_{1:T}\)` from `\(p(\theta|D)\)`
+  - Often we need summary quantities:
+  `$$E[\theta | D] = \int_\Theta \theta p(\theta|D) d\theta$$`
+  `$$V[\theta | D] = \int_\Theta (\theta - E[\theta | D] )^2 p(\theta|D) d\theta$$`
+  `$$E[\tilde y | \tilde x, D]  =\int_\Theta E[\tilde y| \tilde x, \theta] p(\theta | D) d\theta$$`
+
+  - Computing useful quantities requires integration - hard if `\(dim(\theta)\)` is big.
+
+---
+## Monte Carlo Integration
+Recall Monte Carlo (MC) integration. Given `\(i.i.d\)` samples `\(\{\theta^{(t)}\}_{1:T} \sim p(\theta |D)\)`,
+`$$E[ g(\theta) | D] = \int_\Theta g(\theta) p(\theta|D) d\theta \approx \frac{1}{T} \sum_{t=1}^T g(\theta^{(t)})$$`
+--
+
+- For posterior expectation: `\(g(\theta^{(t)}) = 1\)`
+
+--
+  
+- For posterior variance: `\(g(\theta^{(t)}) = (\theta^{(t)} - \frac{1}{T}\sum_t \theta^{(t)} )^2\)`
+
+--
+
+- For posterior prediction: `\(g(\theta^{(t)}) =  E[\tilde y| \tilde x, \theta^{(t)}]\)`
+
+--
+
+Some properties:
+- Convergence rate, `\(\sqrt{T}\)`, independent of `\(dim(\theta)\)`.
+- Converges to posterior mean exactly based on LLN.
+- We have `\(\{\theta^{(t)}\}_{1:T}\)` from MCMC, but they are not exactly `\(i.i.d\)`.
+  - Effective number of draws is less than `\(T\)`.
+
+---
+## Variable Transformation 
+
+Earlier we used MH to get `\(\{\theta_1^{(t)}\}_{1:T} \sim p(\theta|D)\)` from model 
+
+`$$y_i \sim  Ber\Big( p_i=expit(\theta_0 + \theta_1x_{i} )\Big)$$`
+
+--
+
+Suppose we want estimate `\(\hat{OR}=E[exp(\theta)|D]\)`
+
+--
+
+`$$E[exp(\theta)|D] = \int_\Theta e^{\theta} \ p(\theta|D) d\theta \approx \frac{1}{T}\sum_{t=1}^T exp\big(\theta^{(t)} \big)$$`
+---
+
+## Variable Transformation 
+
+&lt;img src="_bayes_computing_files/figure-html/exptheta-.gif" style="display: block; margin: auto;" /&gt;
+
+---
+## Bayesian Prediction
+Suppose we sample parameters of this model with some prior
+
+`$$y_i | x_i, \theta_0, \theta_1, \phi \sim Ber( expit(\ \theta_0 + \theta_1x_i ))$$`
+
+And get posterior draws `\(\{\theta_0^{(t)}, \theta_1^{(t)} \}_{1:T}\)`. Given new `\(\tilde x_i\)`, form 
+out-of-sample prediction
+
+--
+
+`$$\begin{align}
+	E[\tilde y| \tilde x, D] &amp; = \int_\Theta E[\ \tilde y \ | \ \tilde x, \theta_0,\theta_1,\phi] \cdot p(\theta_0,\theta_1,\phi| D)  \\
+	&amp; \approx \frac{1}{T} \sum_{i=1}^T E[\ \tilde y \ | \ \tilde x, \theta_0^{(t)},\theta_1^{(t)},\phi^{(t)}] = \frac{1}{T} \sum_{i=1}^T expit( \theta_0^{(t)} + \theta_1^{(t)} \tilde x_i )
+\end{align}$$`
+
+---
+
+
+## Bayesian Prediction
+
+&lt;img src="_bayes_computing_files/figure-html/bayespred-.gif" style="display: block; margin: auto;" /&gt;
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="style/libs/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

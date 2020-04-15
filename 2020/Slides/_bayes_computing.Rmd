@@ -1,0 +1,908 @@
+---
+title: "BSTA 670:"
+subtitle: "Bayesian Computation: Metropolis Hastings Samplers and Monte Carlo Integration"
+author: "Arman Oganisian <br/> aoganisi@upenn.edu"
+date: "April 16, 2020"
+output:
+  xaringan::moon_reader:
+    chakra: style/libs/remark-latest.min.js
+    lib_dir: style/libs
+    css: style/penn.css
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+```{r setup, include=FALSE}
+set.seed(1)
+options(htmltools.dir.version = FALSE)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, error=FALSE, cache = F, eval=T)
+library(RefManageR)
+library(kableExtra)
+library(dplyr)
+library(mixtools)
+library(mvtnorm)
+library(LaplacesDemon)
+library(latex2exp)
+library(numDeriv)
+```
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+inline <- function(x = "") paste0("`` `r ", x, "` ``")
+
+### ------------------------- Helper Functions  -----------------------------###
+
+vanilla_mh <- function(log_target, theta_curr, prop_sd){
+  theta_star <- rnorm(1, theta_curr, prop_sd )
+  
+  log_accept_prob <- log_target(theta_star) - log_target(theta_curr)
+  accept <- log(runif(1)) < log_accept_prob
+  if(is.na(accept)) browser()
+  if(accept){ return(theta_star) }else{ return(theta_curr)}
+}
+
+### tempered distribution for various temperature, temp.
+ftemp <- function(x, temp) ( (1/3)*dnorm(x,-20,1) + (1/3)*dnorm(x,0,1) + (1/3)*dnorm(x,20,1))^(1/temp)
+log_target <- function(x) log(ftemp(x, temp=1))
+```
+
+## Overview of Bayesian Inference
+- Parameter vector $\theta \in \mathbb{R}^p$ and data $D$.
+- $p( D|  \theta)$ with prior $p(\theta)$ over parameters space.
+
+$$
+\begin{align}
+	p(\theta | D) & = \frac{1}{C}\cdot p( D|  \theta) p( \theta) \\
+					& \propto p( D|  \theta) p( \theta) \\
+\end{align}
+$$
+
+Specifically, $C=p(D)$. Denote
+$$ \tilde p(\theta\mid D) = p( D|  \theta) p( \theta)$$
+
+- Inference engines:
+  - Frequentist: optimization methods for maximizing $p( D| \theta)$.
+  - Bayesian: sampling methods for drawing from $p( \theta | D)$.
+    - Difficult since $C$ unknown.
+
+---
+
+
+## To Make things more concrete
+
+We observe $D = (y_i, x_i)_{1:n}$. Specify, 
+$$ p(D \mid \theta ) = p(y_i\mid x_i, \theta) = N( y_i \mid \theta_0 + \theta_1 x_i, \phi  )$$
+--
+Suppose $\phi$ is known. Here, $\theta = (\theta_0, \theta_1) \in \mathbb{R}^2$
+$$ p(\theta_0, \theta_1) = N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda ) $$
+--
+So, the posterior is proportional to 
+$$\tilde p (\theta_0, \theta_1, \mid D) = \Big\{\prod_i N( y_i \mid \theta_0 + \theta_1 x_i, \phi  ) \Big\} N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$
+We can actually re-arrange $\tilde p$ here: posterior is Normal as well.
+---
+
+## To Make things even more concrete
+
+We observe $D = (y_i, x_i)_{1:n}$, where $y_i$ is a count outcome. Specify, 
+$$ p(D \mid \theta ) = Pois( y_i \mid \exp(\theta_0 + \theta_1 x_i) \  )$$
+--
+
+Where, $\theta = (\theta_0, \theta_1) \in \mathbb{R}^2$
+$$p(\theta_0, \theta_1) = N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$
+--
+So, the posterior is proportional to 
+$$\tilde p (\theta_0, \theta_1, \mid D) = \Big\{\prod_i Pois( y_i \mid \exp(\theta_0 + \theta_1 x_i) \  ) \Big\} N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$
+This posterior is not a known distribution.
+---
+
+## Sampling for a Logistic Regression
+We observe $D = (y_i, x_i)_{1:n}$, where $y_i$ is a binary outcome. Specify, 
+$$ p(D \mid \theta ) = Ber( y_i \mid expit(\theta_0 + \theta_1 x_i) \  )$$
+--
+
+Where $\theta = (\theta_0, \theta_1) \in \mathbb{R}^2$
+$$ p(\theta_0, \theta_1) = N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda ) $$
+
+--
+So, the posterior is proportional to 
+$$\tilde p (\theta_0, \theta_1, \mid D) = \Big\{\prod_i Ber( y_i \mid expit(\theta_0 + \theta_1 x_i) \  ) \Big\} N(\theta_0 \mid 0, \lambda )N(\theta_1 \mid 0, \lambda )$$
+This posterior is not a known distribution. Need a way to sample from 
+$$p (\theta_0, \theta_1, \mid D) = \frac{1}{C}\tilde p (\theta_0, \theta_1, \mid D)$$
+---
+
+## Metropolis, 1953
+Suppose we have $N$ particles in a 2-dimensional plane. The $i^{th}$ particle has Euclidian distance $d_{ij}$ with particle $j$. Let 
+$$\Delta = \{d_{ij} : \forall \ (i,j) \text{ pairs } \}$$
+$\bar n(\Delta)$ denotes average density of all other particles on the surface of any given particle in the system. To estiamte $E[ \bar n (\Delta)]$, need to be able to draw from this distribution, 
+$$p( \Delta ) = \frac{1}{C} \exp \Big(  - \frac{\mathcal{E}(\Delta) }{kT} \Big)$$
+Where $\mathcal{E}(\Delta) = \sum_i \sum_{j\neq i} V(d_{ij})$. Boltzmann constant, $k$, and Temperature parameter $T$.
+---
+
+## Metropolis-Hastings Algorithm
+
+Starting at some value $\theta^{(t-1)}$,
+
+--
+
+1. Propose a move to $\theta^* \sim q( \theta^* \mid \theta^{(t-1)} )$
+
+--
+
+2. Evaluate 
+$$r=\frac{ \tilde p(\theta^* \mid D)}{\tilde p(\theta^{(t-1)} \mid D )} \frac{q( \ \theta^{(t-1)} \ |\  \ \theta^*)}{q( \ \theta^* \ |\   \theta^{(t-1)} \ )}$$
+Take the minimum $\alpha = min(1, r)$. 
+
+--
+
+3. Accept move from $\theta^{(t-1)} \rightarrow \theta^*$ with probability $\alpha$.
+$$ \theta^{(t)} = \theta^* I( U < \alpha ) + \theta^{(t-1)}I(U>\alpha) $$
+--
+$U \sim Unif(0,1)$ (works since CDF is $P(U < \alpha) = \alpha$ ).
+---
+
+## Metropolis Algorithm
+- $q(\cdot \mid \cdot )$ is symmetric about $\theta^{(t-1)}$. e.g. 
+$$q(\theta^* \mid \theta^{(t-1)} ) = N(\theta^{(t-1)}, \sigma^2)$$
+Implies $\frac{q( \ \theta^{(t-1)} \ |\  \ \theta^*)}{q( \ \theta^* \ |\   \theta^{(t-1)} \ )}=1$
+
+--
+
+- Chain of $\theta^{(t)}$ can be thought of as a "random walk" with step size $\sigma$.
+$$\theta^* = \theta^{(t-1)} + \sigma\epsilon^{(t-1)}$$
+
+--
+
+- Note use of $\tilde p$ instead of $p$:
+
+$$\frac{p(\theta^* \mid D)}{p(\theta^{(t-1)} \mid D)} = \frac{ \frac{1}{C} \tilde p(\theta^* \mid D)}{\frac{1}{C} \tilde p(\theta^{(t-1)} \mid D)} =  \frac{ \tilde p(\theta^* \mid D)}{\tilde p(\theta^{(t-1)} \mid D )}$$
+$\alpha=1$ for $\theta^*$ that are up hill from $\theta^{(t-1)}$. Connects to hill-climbing algos.
+
+---
+
+## R code for MH
+```{r, echo=T, eval=F}
+# target log density 
+p_tilde <- function(y, x, theta){
+  p <- invlogit( x %*% theta)
+  lik <- sum(dbinom(y, 1, p, log = T))
+  pr <- sum(dnorm( theta, 0, 3, log = T))
+  eval <- lik + pr
+  return(eval)
+}
+```
+---
+
+## R code for MH
+```{r, echo=T, eval=F}
+iter = 5000 # number of iterations
+tau = .1 # proposal sd
+theta = matrix(NA, nrow = 2, ncol = iter) # for storing draws
+theta[,1] = c(0,0) # initialize
+
+for(i in 2:iter){
+  # propose theta
+  theta_star = MASS::mvrnorm(1, theta[,i-1] , tau*diag(2) )
+  
+  # evaluate under proposal and current value
+  prop_eval = p_tilde(y, x, theta_star)
+  curr_eval = p_tilde(y, x, theta[,i-1, drop=F])
+  
+  ## compute r
+  ratio <- exp( prop_eval - curr_eval )
+  alpha = min(c(1,ratio))
+  
+  ## accept or reject
+  U = (runif(1) < alpha )
+  
+  theta[, i] = U*theta_star + (1-U)*theta[, i-1]
+}
+```
+---
+
+
+## MH for univariate logistic regression
+
+```{r, echo=F}
+set.seed(1023)
+N=1000
+x <- cbind(1, rnorm(N))
+y <- rbinom(N, 1, invlogit( 1 - 1*x[,2] ) )
+
+p_tilde <- function(y, x, th){
+  p <- invlogit( x %*% th)
+  res <- sum(dbinom(y, 1, p, log = T)) + sum(dnorm( th, 0, 10, log = T))
+  return(res)
+}
+
+iter <- 2000
+
+theta <- matrix(NA, nrow = 2, ncol = iter)
+theta[,1] <- c(0,0)
+
+theta2 <- matrix(NA, nrow = 2, ncol = iter)
+theta2[,1] <- c(0,0)
+
+theta3 <- matrix(NA, nrow = 2, ncol = iter)
+theta3[,1] <- c(0,0)
+
+theta_list = list(theta, theta2, theta3)
+
+prop_vec = c(.001, .01, 1)
+
+```
+
+```{r, echo=F}
+set.seed(12345)
+for(i in 2:iter){
+  
+  ## loop through the proposals
+  for( p in 1:3){
+    theta_star <- MASS::mvrnorm(1, theta_list[[p]][,i-1] ,prop_vec[p]*diag(2) )
+    
+    prop_eval = p_tilde(y, x, theta_star)
+    curr_eval = p_tilde(y, x, theta_list[[p]][,i-1, drop=F])
+
+    ratio <- exp( prop_eval - curr_eval )
+    U <- ( runif(1) < min(c(1, ratio)) )
+    theta_list[[p]][, i] <- U*theta_star + (1-U)*theta_list[[p]][, i-1]
+  }
+  
+}
+```
+
+
+```{r sampleani,echo=F, eval=T, cache=F, fig.show='animate', fig.width=10,interval=.25, fig.height=7.5, aniopts="loop", animation.hook='gifski', fig.align='center'}
+
+for(i in seq(10, iter, 5)){
+  par(mfrow=c(2,3))
+  
+  for(p in 1:3){
+    plot(theta_list[[p]][1,2:i], theta_list[[p]][2,2:i], type='l', 
+         xlim=c(-.25,2), ylim=c(-2,.5),
+         xlab=TeX('$\\theta_0$'),ylab=TeX('$\\theta_1$'),
+         main= paste0('Proposal Variance = ', as.character(prop_vec[p])) )
+    
+    ellipse(c(1,-1), cov(t(theta_list[[2]][,500:iter])), alpha = .05, col='red',lwd=2)
+    ellipse(c(1,-1), cov(t(theta_list[[2]][,500:iter])), alpha = .5, col='red',lwd=2)
+    ellipse(c(1,-1), cov(t(theta_list[[2]][,500:iter])), alpha = .75, col='red',lwd=2)
+    ellipse(c(1,-1), cov(t(theta_list[[2]][,500:iter])), alpha = .95, col='red',lwd=2)
+    ellipse(c(1,-1), cov(t(theta_list[[2]][,500:iter])), alpha = .25, col='red',lwd=2)
+
+    lines(theta_list[[p]][1,2:i], theta_list[[p]][2,2:i])
+  }
+  
+  for(p in 1:3){
+    plot(theta_list[[p]][2,2:i], type='l', xlim=c(0,iter), 
+         xlab='iteration, t',
+         ylab=TeX('$\\theta_1$'))
+    abline(h=-1, col='red', lwd=3)
+  }
+}
+
+```
+---
+
+
+## Issues with Metropolis
+Like optimizers, samplers suffer from many analagous issues. 
+
+- Poor choice of proposal variance. 
+- Sampling distributions over high-dimensional spaces.
+- Sampling multi-modal distributions (bottlenecks).
+---
+
+## Issues with Metropolis - Proposal Variance
+```{r, echo=F, fig.width=6,fig.height=4,fig.align="center"}
+curve(dnorm(x, sd=1), from=-4, to=4,
+      ylab=TeX("$p(\\theta | D)$"),
+      xlab=TeX("$\\theta$"))
+curve(.1*dnorm(x, 2, sd=.1), col='red', lty=2, add=T, n = 500)
+curve(.1*dnorm(x, 2, sd=.5), col='green', lty=2, add=T, n = 500)
+curve(.1*dnorm(x, 2, sd=1.5), col='blue', lty=2, add=T, n = 500)
+legend('topleft', lty = c(1,2,2,2), 
+       col = c('black', 'red', 'green', 'blue'),
+       legend = c(TeX("$p(\\theta | D)$"), 
+                  TeX("$\\sigma = .1$"),
+                  TeX("$\\sigma = .5$"), 
+                  TeX("$\\sigma = 1.5$")), bty='n')
+```
+
+- If $\sigma$ is too low, we will accept often, but take smaller step sizes each time.
+- If $\sigma$ is too high, we won't accept very often but will take large step sizes. 
+---
+
+## Issues with Metropolis - Dimensionality
+```{r, echo=F, fig.width=10,fig.height=5,fig.align="center"}
+
+par(mfrow=c(1,2))
+curve(dnorm(x, sd=1), from=-4, to=4,
+      ylab=TeX("$p(\\theta | D)$"),
+      xlab=TeX("$\\theta$"), col='red')
+curve(.1*dnorm(x, 2, sd=.5), col='green', lty=1, add=T, n = 500)
+
+
+curve(sqrt(1 - x^2), from=-3, to=3, ylim=c(-3,3), n = 100000, 
+      col='red', 
+      xlab=TeX("$\\theta_0$"), 
+      ylab=TeX("$\\theta_1$"))
+curve(-1*sqrt(1 - x^2), from=-3, to=3, ylim=c(-3,3), add=T, n=100000, 
+      col='red')
+
+
+curve(sqrt(.5 - (x-1)^2), from=-3, to=3, ylim=c(-10,10), n = 100000, add=T, 
+      col='green')
+curve(-1*sqrt(.5 - (x-1)^2), from=-3, to=3, ylim=c(-3,3), add=T, n=100000, 
+      col='green')
+
+points(x = c(1,0), c(0,0), pch=20, col=c('green', 'red'))
+legend('topleft', 
+       legend = c( TeX("$p(\\theta_0, \\theta_1 | D)$"),
+                    TeX("$N_2( (\\theta_0, \\theta_1), I_2)$ proposal")),
+       col=c('red','green'), lty=c(1,1) )
+```
+
+- Hard to find the right direction in high dimensions.
+---
+
+## Issues with Metropolis - Bottlenecks
+```{r, echo=F, fig.width=10,fig.height=5,fig.align="center"}
+curve(ftemp(x, 1), from=-30, to=30, n=1000, 
+      ylim=c(0,.2),
+      ylab=TeX("$p(\\theta | D)$"),
+      xlab=TeX("$\\theta$"), col='red')
+curve(.3*dnorm(x, 2, sd=3), col='green', lty=1, add=T, n = 500, 
+      from=-10, to=15)
+```
+---
+
+
+## Adaptive MH
+Roberts and Rosenthal, 2001: optimal acceptance rate for $d>5$ is $.234$ 
+
+-- 
+
+Starting at some value $\theta^{(0)}$, and some proposal sd $\sigma^{(0)}$. Specify adaptation times: adapt every $t^A$ iterations until iteration 1000. 
+
+--
+
+For $t=1,2, \dots, \dots T$,
+1. Propose a move to $\theta^* = \theta^{(t-1)} + \sigma^{(t-1)}\epsilon$
+2. Evaluate $r=\frac{ \tilde p(\theta^* \mid D)}{\tilde p(\theta^{(t-1)} \mid D )}$. Take $\alpha^{(t)} = min(1, r)$. 
+3. Accept/Reject.
+$$ \theta^{(t)} = \theta^* I( U < \alpha ) + \theta^{(t-1)}I(U>\alpha) $$
+
+--
+
+4. If $t$ is an adaptation time,
+$$ \sigma^{(t)} \leftarrow \sigma^{(t-1)} \times \frac{(1/t^A) \sum_{t-t^A}^{t-1} \alpha^{(t)}}{.234} $$
+---
+
+
+## Adaptive MH
+
+```{r, echo=F, fig.width=10, fig.height=4}
+set.seed(10)
+
+iter = 2000
+tA = seq(100, 1000, 100)
+
+## shells for storing draws.
+theta = matrix(NA, nrow = 2, ncol = iter)
+theta2 = matrix(NA, nrow=2, ncol=iter) ## no adaptation
+
+sigma = numeric(length = iter)
+
+## to store acceptance probabilities
+alpha_shell = numeric(length = iter )
+alpha_shell2 = numeric(length = iter )
+
+
+## initialize
+theta[,1] = c(0,0)
+theta2[,1] = c(0,0)
+sigma[1] = sqrt(2)
+
+for(i in 2:iter){
+  
+  ### update with adaptation
+  theta_star = MASS::mvrnorm(1, theta[,i-1] , (sigma[i-1]^2)*diag(2) )
+  
+  prop_eval = p_tilde(y, x, theta_star)
+  curr_eval = p_tilde(y, x, theta[,i-1, drop=F])
+
+  ratio = exp( prop_eval - curr_eval )
+  alpha = min(c(1, ratio))
+  U = ( runif(1) < alpha )
+  theta[, i] = U*theta_star + (1-U)*theta[, i-1]
+  
+  alpha_shell[i] = alpha
+  
+  if(i %in% tA ){
+    sigma[i] = sigma[i-1]*(mean(alpha_shell[(i-99):i])/.234)
+  }else{
+    sigma[i] = sigma[i-1]
+  }
+  
+  ### update without adaptation
+  theta_star = MASS::mvrnorm(1, theta2[,i-1] , (sigma[1]^2)*diag(2) )
+  
+  prop_eval = p_tilde(y, x, theta_star)
+  curr_eval = p_tilde(y, x, theta2[,i-1, drop=F])
+
+  ratio = exp( prop_eval - curr_eval )
+  alpha = min(c(1, ratio))
+  U = ( runif(1) < alpha )
+  theta2[, i] = U*theta_star + (1-U)*theta2[, i-1]
+  
+  alpha_shell2[i] = alpha
+  
+  
+}
+```
+
+```{r,echo=F, eval=T, cache=F, fig.show='animate', fig.width=15,interval=.25, fig.height=6, delay=.5, aniopts="control", animation.hook='gifski', fig.align='center'}
+for(i in seq(25, iter, 50)){
+  
+  par(mfrow=c(1,3),cex=1.1)
+  plot(sigma[1:i], type='l', 
+       main=TeX("$\\sigma^{(t)}$"),
+       xlab='Iteration, t', ylab=TeX("$\\sigma^{(t)}$"),
+       xlim=c(0,2000), ylim=c(0,1.5))
+  abline(v=1000, col='gray', lty=2)
+  
+  plot(cumsum(alpha_shell[1:i])/1:i, type='l', ylim=c(0,1),
+       main=TeX("Running Average of $\\alpha$."),
+       xlab='Iteration, t', ylab=TeX("Avg($\\alpha^{(t)}$)"),
+       xlim=c(0,2000))
+  lines(cumsum(alpha_shell2[1:i])/1:i, col='orange')
+  abline(v=1000, col='gray', lty=2)
+  abline(h=.234, col='red')
+  
+  plot(theta[2,1:i], type='l', xlab='Iteration, t', 
+       ylab=TeX("$\\theta_1$"), 
+       main=TeX('MCMC Chain for $\\theta_1$'),
+       xlim=c(0,2000), ylim=c(-2.5,0))
+  lines(theta2[2,1:i], col='orange')
+  abline(h=-1, col='red')
+
+}
+
+```
+
+---
+
+
+## Dimensionality - MALA
+Vanilla Metropolis: 
+$$\theta^{*} = \theta^{(t-1)} + \sigma\epsilon^{(t-1)}$$
+--
+
+Metropolis-Adjusted Langevin Algorithm:
+$$\theta^{*} = \theta^{(t-1)} + \frac{\sigma^2}{2} \cdot \nabla \tilde p( \ \theta^{(t-1)} \ ) + \sigma\epsilon^{(t-1)}$$
+
+--
+
+- Paul Langevin: differential equation modeling motion of particles through space.
+- Tends to propose in the direction of high posterior density, $\nabla \tilde p(\theta^{(t-1)})$.
+- Generates "better" proposals.
+- Optimal acceptance rate about $.5$ in high d.
+- Two changes to the Metropolis update:
+  - Need to evaluate gradient (numerically). 
+  - Need to include proposal distribution in $\alpha$
+
+---
+
+## MALA R code
+Previous univariate logistic regression
+```{r, echo=T, eval=F}
+for(i in 2:1000){
+  
+  ## standard normal draw
+  eps = MASS::mvrnorm(1, c(0,0), diag(2) )
+
+  ## compute gradient
+  p_tilde_grad = numDeriv::grad(p_tilde, x = theta[, i-1], 
+                                xx=x, y=y )
+  
+  ## generate proposal
+  theta_star = theta[, i-1] + .5*(sig^2)*p_tilde_grad + sig*eps
+  
+  ...
+}
+```
+
+---
+
+## Logistic Regression Example
+```{r, echo=F, eval=T, cache=T}
+
+p_tilde = function(y, xx, theta){
+  p <- invlogit( x %*% theta)
+  lik <- sum(dbinom(y, 1, p, log = T))
+  pr <- sum(dnorm( theta, 0, 3, log = T))
+  eval <- lik + pr
+  return(eval)
+}
+
+p_tilde_grad = function(x){
+  eval = grad(p_tilde, x = thetal[[m]][, i-1], xx=x, y=y )
+  return(eval)
+}
+
+iter = 1000
+n_chains = 4
+sig=.1
+theta <- matrix(NA, nrow=2, ncol=iter)
+
+## run four chains
+thetal = lapply(seq_len(n_chains), function(x) theta )
+
+thetal[[1]][, 1] = c(2,-2)
+thetal[[2]][, 1] = c(2,2)
+thetal[[3]][, 1] = c(0,-2)
+thetal[[4]][, 1] = c(0,1)
+
+for( m in 1:n_chains){
+  for(i in 2:iter){
+  
+    eps = MASS::mvrnorm(1, c(0,0), diag(2) )
+    
+    grad_eval = p_tilde_grad(theta[, i-1])
+
+    theta_star = thetal[[m]][, i-1] + .5*(sig^2)*grad_eval + sig*eps
+    
+    # evaluate under proposal and current value
+    prop_eval = p_tilde(y, x, theta_star)
+    curr_eval = p_tilde(y, x, thetal[[m]][,i-1, drop=F])
+    
+    q_star_t = sum(dnorm(thetal[[m]][,i-1], 
+                         theta_star + .5*(sig^2)*p_tilde_grad(theta_star), 
+                         rep(sig, 2), log = T))
+
+    q_t_star = sum(dnorm(theta_star, 
+                         thetal[[m]][,i-1] + .5*(sig^2)*p_tilde_grad(thetal[[m]][,i-1]), 
+                         sd= rep(sig, 2), log = T))
+
+    ## compute r
+    ratio <- exp( prop_eval - curr_eval + q_star_t - q_t_star )
+    alpha = min(c(1,ratio))
+    
+    ## accept or reject
+    U = (runif(1) < alpha )
+    
+    thetal[[m]][, i] = U*theta_star + (1-U)*thetal[[m]][, i-1]
+  }
+}
+```
+
+```{r, echo=F, eval=T, cache=T, fig.show='animate', fig.width=6, interval=.5, fig.height=6, aniopts="loop", animation.hook='gifski', fig.align='center'}
+colv=c('black', 'lightblue', 'orange', 'darkgreen')
+
+for(i in seq(10, iter, 5)){
+  plot(1, -1, col='red', pch=20, xlim=c(-1,3), ylim=c(-2,2.5), 
+       xlab=TeX("$\\theta_0$"), ylab= TeX("$\\theta_1$"))
+  for(m in 1:n_chains){
+    lines(thetal[[m]][1 , 1:i], thetal[[m]][2 , 1:i ], col=colv[m] )
+  }
+  points(1, -1, col='red', pch=20, cex=1.5) ## true values.
+}
+
+```
+---
+
+## Parallel Tempering
+
+For some temperature, $T\geq1$, Define "Tempered" posterior
+
+$$
+\begin{align}
+	p(\theta \mid D)^{{1/T}} & = \frac{1}{C^{1/T}} \tilde p(\theta \mid D)^{1/T} \\
+	                     & \propto \tilde p(\theta \mid D)^{1/T}
+\end{align}
+$$
+
+--
+
+```{r, echo=F, fig.width=12,fig.height=6,fig.align="center"}
+curve(ftemp(x, 1), from=-30, to=30, n=1000, 
+      ylim=c(0,.15),
+      main=TeX("$p(\\theta | D)^{1/T}$"),
+      ylab="",
+      xlab=TeX("$\\theta$"), col='red')
+## multiply these by a constant to get on same scale. 
+## scale doesn't matter anyway since we just care about proportionality.
+curve(.2*ftemp(x, 5), col='gray', lty=1, add=T, n = 1000)
+curve(.165*ftemp(x, 10), col='black', lty=1, add=T, n = 1000)
+curve(.15*ftemp(x, 20), col='lightblue', lty=1, add=T, n = 1000)
+legend('topleft',
+       legend = c(TeX("$T=20$"),TeX("$T=10$"),TeX("$T=5$"),TeX("$T=1$")),
+       col=c('lightblue','black','gray','red' ), 
+       lty=c(1,1,1,1), bty='n' )
+
+```
+
+---
+
+
+## Parallel Tempering
+
+```{r, echo=F, fig.width=12,fig.height=6,fig.align="center"}
+curve(ftemp(x, 1), from=-30, to=30, n=1000, 
+      ylim=c(0,.15),
+      main=TeX("$p(\\theta | D)^{1/T}$"),
+      ylab="",
+      xlab=TeX("$\\theta$"), col='red')
+## multiply these by a constant to get on same scale. 
+## scale doesn't matter anyway since we just care about proportionality.
+curve(.15*ftemp(x, 20), col='lightblue', lty=1, add=T, n = 1000)
+legend('topleft',
+       legend = c(TeX("$T=20$"), TeX("$T=1$")),
+       col=c('lightblue','red' ), 
+       lty=c(1,1), bty='n' )
+
+```
+
+- Have two chains that independently update via MH in each iteration
+- After each chain is updated, propose a swap between the chains.
+- The chain targeting posterior hops from mode to mode as swaps are accepted.
+
+---
+
+## Parallel Tempering
+
+At iteration $m-1$, given $\theta_T^{(t-1)}\sim p(\theta |D)^{1/T}$ for $T=1,\dots, \tau$
+
+1. Update chains for $p(\theta |D)^{1/T}$ with some proposal $q_T$: 
+$$\theta_T^{(m-1)} \stackrel{MH}{\rightarrow} \theta_T^{(m)}$$
+
+--
+
+3. Choose two chains, $k,j$ uniformly from $\{1, \dots,\tau\}$ to swap. Compute acceptance probability
+
+$$\alpha= min(1, \frac{ [ \tilde p(\theta_k|D) / \tilde p(\theta_j|D)]^{1/j} }{ [ \tilde p(\theta_k|D) / \tilde p(\theta_j|D)]^{1/k} })$$
+
+--
+
+4. if $I(U\leq \alpha)$, swap:
+$$ \theta^{(m)}_k \leftarrow \theta_j^{(m)} $$
+$$ \theta^{(m)}_j \leftarrow \theta_k^{(m)} $$
+
+--
+
+
+- roughly: "if the relative probability $\theta_k$ versus $\theta_j$ is higher temperature $j$, then swap so that $\theta_k$ is associated with temperature $j$"
+- Only keep chain for $T=1$ (the target).
+---
+
+
+```{r}
+set.seed(10)
+iter <- 500
+tempv <- c(1,20)
+n_temps <- length(tempv)
+temp_indx <- 1:n_temps
+eta_shell <- matrix(0, nrow=iter, ncol=n_temps)
+eta_shell_no_switch = matrix(0, nrow=iter, ncol=n_temps)
+swap_shell <- numeric(length = iter)
+for( i in 2:iter){
+  
+  ## update chains (potentially in parallel )
+  for(t in temp_indx){
+    log_target <- function(x) log( ftemp(x, temp=tempv[t]) )
+    
+    prop_sd = ifelse(t==1, 1, 10)
+    
+    eta_shell[i, t] <-  vanilla_mh(log_target = log_target, 
+                                   theta_curr = eta_shell[i-1, t], 
+                                  prop_sd = prop_sd)
+    
+  }
+  eta_shell_no_switch[i, ] = eta_shell[i, ]
+  
+  ## propose swap, from swap_idx[1] (chain j) to swap_idx[2] (chain k)
+  swap_idx <- sample(temp_indx, 2)
+  cj <- swap_idx[1]
+  ck <- swap_idx[2]
+  eta_j <- eta_shell[ i , cj]
+  eta_k <- eta_shell[ i , ck]
+  
+  log_target <- function(x) log(ftemp(x, temp=1))
+  f1 <- tempv[cj]*( log_target( eta_j ) - log_target( eta_k ) )
+  f2 <- tempv[ck]*( log_target( eta_k ) - log_target( eta_j )  )
+  
+  accept_prob <- min( c(1, exp(f1 + f2) ) )
+    
+  if( rbinom(1,1, accept_prob)==1 ){
+    
+    ## make the swap
+    eta_shell[i, cj] <- eta_k
+    eta_shell[i, ck] <- eta_j
+    
+    ## record the swap
+    swap_shell[i] = ifelse(cj!=ck, 1, 0)
+  }
+  
+}
+```
+
+
+
+## Parallel Tempering
+
+```{r make_gif,  echo=F, warning=FALSE, message=FALSE, error=FALSE, fig.show='animate', fig.width=11, interval=.25, fig.height=7, cache=T, aniopts="loop", animation.hook='gifski', fig.align='center', eval=T}
+for( i in seq(2,iter, 1)){
+  par(mfrow=c(1,2))
+  plot(eta_shell_no_switch[1:i,2], type='l', col='lightgray', 
+       ylim=c(-50,50), xlim=c(0,iter), 
+       xlab='Iteration', ylab='Posterior Draw')
+  lines(eta_shell[1:i,1], col='steelblue')
+  #lines(eta_shell_no_switch[,1], col='green')
+  points(1:i, eta_shell[1:i, 1], pch=20, 
+         col=ifelse(swap_shell[1:i]==1, 'red', NA) )
+  lines(eta_shell_no_switch[1:i, 2], col='lightgray')
+  legend('topleft', bty='n',
+         legend = c('Chain exploring tempered posterior',
+                    'Chain exploring posterior', 
+                    'Swaps between chains'), 
+         col=c('lightgray', 'steelblue', 'red'), lty=c(1,1,NA), pch=c(NA,NA, 20) )
+  
+  
+  hist(eta_shell[1:i,1], breaks=30,freq = F, 
+       xlim=c(-25, 25), ylim=c(0,.25), 
+       main='Posterior Draws', xlab='', col='lightblue')
+  curve(ftemp(x,temp=1), from = -40, to=40,ylim=c(0,1), add=T, col='pink', 
+        n = 100000,lwd=2)
+  legend('topleft', legend = 'Posterior', col = 'pink', lty=1, bty='n')
+  }
+```
+
+---
+
+
+
+## Monte Carlo Integration
+- We covered methods for obtaining draws $\{ \theta^{(t)} \}_{1:T}$ from $p(\theta|D)$
+  - Often we need summary quantities:
+  $$E[\theta | D] = \int_\Theta \theta p(\theta|D) d\theta$$
+  $$V[\theta | D] = \int_\Theta (\theta - E[\theta | D] )^2 p(\theta|D) d\theta$$
+  $$E[\tilde y | \tilde x, D]  =\int_\Theta E[\tilde y| \tilde x, \theta] p(\theta | D) d\theta$$
+
+  - Computing useful quantities requires integration - hard if $dim(\theta)$ is big.
+
+---
+## Monte Carlo Integration
+Recall Monte Carlo (MC) integration. Given $i.i.d$ samples $\{\theta^{(t)}\}_{1:T} \sim p(\theta |D)$,
+$$E[ g(\theta) | D] = \int_\Theta g(\theta) p(\theta|D) d\theta \approx \frac{1}{T} \sum_{t=1}^T g(\theta^{(t)})$$
+--
+
+- For posterior expectation: $g(\theta^{(t)}) = 1$
+
+--
+  
+- For posterior variance: $g(\theta^{(t)}) = (\theta^{(t)} - \frac{1}{T}\sum_t \theta^{(t)} )^2$
+
+--
+
+- For posterior prediction: $g(\theta^{(t)}) =  E[\tilde y| \tilde x, \theta^{(t)}]$
+
+--
+
+Some properties:
+- Convergence rate, $\sqrt{T}$, independent of $dim(\theta)$.
+- Converges to posterior mean exactly based on LLN.
+- We have $\{\theta^{(t)}\}_{1:T}$ from MCMC, but they are not exactly $i.i.d$.
+  - Effective number of draws is less than $T$.
+
+---
+## Variable Transformation 
+
+Earlier we used MH to get $\{\theta_1^{(t)}\}_{1:T} \sim p(\theta|D)$ from model 
+
+$$y_i \sim  Ber\Big( p_i=expit(\theta_0 + \theta_1x_{i} )\Big)$$
+
+--
+
+Suppose we want estimate $\hat{OR}=E[exp(\theta)|D]$
+
+--
+
+$$E[exp(\theta)|D] = \int_\Theta e^{\theta} \ p(\theta|D) d\theta \approx \frac{1}{T}\sum_{t=1}^T exp\big(\theta^{(t)} \big)$$
+---
+
+## Variable Transformation 
+
+```{r exptheta, cache=F, fig.show='animate', fig.width=12,interval=.25, fig.height=6, animation.hook='gifski', fig.align='center', echo=F, eval=T}
+p=2
+par(mfrow=c(1,3), cex=1.25)
+for(i in seq(10, 2000, 10)){
+  
+plot(theta_list[[p]][2,2:i], type='l', xlim=c(0,2000), xlab='iteration, t',
+     ylab=TeX("$\\theta_1$"), main=TeX('MCMC Chain of $\\theta_1$'))
+abline(h=-1, col='red', lwd=1)
+
+hist(exp(theta_list[[p]][2,2:i]), breaks=35,
+     xlab='Posterior Draws', main=TeX("Posterior of $exp(\\theta_1)$") )
+abline(v=exp(-1), col='red', lwd=1)
+
+cavg <- cumsum( exp( theta_list[[p]][2,2:i] ) ) / (1:(i-1))
+cvar <- ( cumsum( (exp( theta_list[[p]][2,2:i] ) - cavg)^2) )/( 1:(i-1) )
+lwr <- cavg - 3*sqrt(cvar/ (1:(i-1) ) )
+upr <- cavg + 3*sqrt(cvar/ (1:(i-1) ) )
+
+plot( cavg, type='l', xlim=c(0,2000), xlab='iteration, t',
+      ylab=TeX("$E[exp(\\theta_1)|D]$"), main=TeX("Posterior Mean $E(exp(\\theta_1)|D)$"),
+      ylim=c(.3,1) )
+polygon(c(2:i,rev(2:i)),c(lwr,rev(upr)),col="gray",border=NA)
+lines(cavg)
+abline(h=exp(-1), col='red', lwd=1)
+
+}
+```
+
+---
+## Bayesian Prediction
+Suppose we sample parameters of this model with some prior
+
+$$y_i | x_i, \theta_0, \theta_1, \phi \sim Ber( expit(\ \theta_0 + \theta_1x_i ))$$
+
+And get posterior draws $\{\theta_0^{(t)}, \theta_1^{(t)} \}_{1:T}$. Given new $\tilde x_i$, form 
+out-of-sample prediction
+
+--
+
+$$\begin{align}
+	E[\tilde y| \tilde x, D] & = \int_\Theta E[\ \tilde y \ | \ \tilde x, \theta_0,\theta_1,\phi] \cdot p(\theta_0,\theta_1,\phi| D)  \\
+	& \approx \frac{1}{T} \sum_{i=1}^T E[\ \tilde y \ | \ \tilde x, \theta_0^{(t)},\theta_1^{(t)},\phi^{(t)}] = \frac{1}{T} \sum_{i=1}^T expit( \theta_0^{(t)} + \theta_1^{(t)} \tilde x_i )
+\end{align}$$
+
+---
+
+
+## Bayesian Prediction
+
+```{r bayespred, cache=F, fig.show='animate', fig.width=12,interval=.25, fig.height=6, animation.hook='gifski', fig.align='center', echo=F, eval=T}
+par(mfrow=c(1,3), cex=1.25)
+
+theta[,1] <- c(9.5,9.5)
+p=2
+
+for( i in seq(10, 2000, 10)){
+
+plot(theta_list[[p]][1,2:i], theta_list[[p]][2,2:i], type='l',
+     xlab=TeX("$\\theta_0$"),ylab=TeX("$\\theta_1$"),
+     xlim=c(-.5,1.5), ylim=c(-1.5,.5), pch=20,
+     main='Joint Posterior')
+points(1,-1, col='red',pch=20)
+ellipse(c(1,-1), cov(t( theta_list[[p]][ ,2:2000] )),alpha = .05, col='red',lwd=2)
+ellipse(c(1,-1), cov(t( theta_list[[p]][ ,2:2000] )),alpha = .5, col='red',lwd=2)
+ellipse(c(1,-1), cov(t( theta_list[[p]][ ,2:2000] )),alpha = .75, col='red',lwd=2)
+ellipse(c(1,-1), cov(t( theta_list[[p]][ ,2:2000] )),alpha = .95, col='red',lwd=2)
+ellipse(c(1,-1), cov(t( theta_list[[p]][ ,2:2000] )),alpha = .25, col='red',lwd=2)
+
+y_tilde <- invlogit( theta_list[[p]][ 1,2:i] + theta_list[[p]][ 2,2:i]*1)
+hist(y_tilde, breaks=50, xlim=c(.15,.6), main=TeX("Draws of $\\tilde{y}$"),
+     xlab=TeX("$\\tilde{y}$"))
+abline(v= invlogit(1 -1*1), col='red', lwd=2)
+
+cavg2 <- cumsum( y_tilde ) / (1:(i-1))
+cvar2 <- ( cumsum( (y_tilde - cavg2)^2) )/( (1:(i-1)) )
+lwr2 <- cavg2 - 3*sqrt(cvar2 /(1:(i-1)) )
+upr2 <- cavg2 + 3*sqrt(cvar2 /(1:(i-1)) )
+
+plot( cavg2, type='l', xlim=c(0,2000), xlab='Iteration, t',
+      ylab='Mean Prediction', main=TeX("E( $\\tilde{y}$ | D)"),
+      ylim=c(.4,.7))
+polygon(c(2:i,rev(2:i)),c(lwr2,rev(upr2)),col="gray",border=NA)
+lines(cavg2)
+abline(h= invlogit(1 + -1*1), col='red', lwd=1)
+  
+}
+```
+
+
+
+
+
+
+

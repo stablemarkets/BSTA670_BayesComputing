@@ -1,0 +1,9 @@
+base
+RefManageR
+kableExtra
+dplyr
+mixtools
+mvtnorm
+LaplacesDemon
+latex2exp
+numDeriv
